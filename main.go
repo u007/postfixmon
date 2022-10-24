@@ -439,101 +439,105 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 	sessionId string, sender string, recipients []string,
 	startTime time.Time, timeStr string) error {
-	r := 0
 	log("Processing session %s: %s -> %v", sessionId, sender, recipients)
-	for {
-		recipient := recipients[r]
-		log("session %s: %s -> %s", sessionId, sender, recipient)
-		process := false
-		skipTime := false
-		var thetime time.Time
-		var err error
-		var senderDomain string
-		var recipientDomain string
-
-		thetime, err = tools.ParseDate(timeStr)
-		if err != nil {
-			panic(fmt.Errorf("Unable to read date: %#v on line %d", thetime, lineNo))
-		}
-		if !startTime.IsZero() {
-			if thetime.Before(startTime) {
-				log("Skipping by time %s expected %s", thetime.Format(time.RFC3339), startTime.Format(time.RFC3339))
-				skipTime = true
-			} else {
-				// log("ok time %s(%s) after %s", thetime.Format(time.RFC3339), res[1], startTime.Format(time.RFC3339))
-			}
+	
+	var thetime time.Time
+	var err error
+	skipTime := false
+	thetime, err = tools.ParseDate(timeStr)
+	if err != nil {
+		panic(fmt.Errorf("Unable to read date: %#v on line %d", thetime, lineNo))
+	}
+	if !startTime.IsZero() {
+		if thetime.Before(startTime) {
+			log("Skipping by time %s expected %s", thetime.Format(time.RFC3339), startTime.Format(time.RFC3339))
+			skipTime = true
 		} else {
-			log("Start time is zero? %s", startTime.Format(time.RFC3339))
+			// log("ok time %s(%s) after %s", thetime.Format(time.RFC3339), res[1], startTime.Format(time.RFC3339))
 		}
+	} else {
+		log("Start time is zero? %s", startTime.Format(time.RFC3339))
+	}
 
-		if !skipTime && strings.Index(sender, "@") > 0 {
-			process = true
-		} //is email
+	if (skipTime) {
+		log("Skiptime session %s: %s -> %v", sessionId, sender, recipients)
+		return nil
+	}
 
-		if process {
-			senderDomain, err = emailDomainName(sender)
-			if err != nil {
-				return fmt.Errorf("unable to obtain domain from email %s, error: %v", sender, err.Error())
-			}
-			hasExternal := false
-			recipients := strings.Split(recipient, " ")
-			for _, rec := range recipients {
-				recipientDomain, err = emailDomainName(rec)
-				if err != nil {
-					log(fmt.Sprintf("unable to obtain domain from email %s, error: %v", err, rec))
-					// return fmt.Errorf("unable to obtain domain from email %s, error: %v", err, recipient)
-					r = r + 1
-					continue
-				}
-				if senderDomain == recipientDomain {
-					log("detected same domain %s | %s", sender, rec)
-					r = r + 1
-					continue
-				}
-				log("detected other domain %s | %s", recipientDomain, rec)
-				hasExternal = true
-			}
+	process := strings.Index(sender, "@") > 0
+	
+	if (!process && !skipTime) {
+		log("Ignoring session %s %#v : %#v ||||| | %s | %s", sessionId, sender, thetime.Format(time.RFC3339))
+		time.Sleep(2 * time.Second)
+		return nil
+	}
 
-			process = hasExternal
-		}
-
-		if process {
-			minCount, hourCount, err := mailCount(thetime, sender)
-			if err != nil {
-				return err
-			}
-			minCount++
-			hourCount++
-			//TODO save based on X recipients per email?
-
-			if err := mailCountStore(thetime, sender, hourCount, minCount); err != nil {
-				panic(fmt.Errorf("Unable to save count %s, time: %#v, error: %#v", sender, thetime, err))
-			}
-
-			if minCount > int64(maxPerMin) || hourCount > int64(maxPerHour) {
-				if err := whm.SuspendEmail(sender); err != nil {
-					log("Unable to suspendEmail %s, error: %+v", sender, err)
-					time.Sleep(5 * time.Second)
-				}
-
-				if notifyEmail != "" {
-					if err = notifySuspend(sender, fmt.Sprintf("Count: minute: %d, hour: %d", minCount, hourCount)); err != nil {
-						log("notifySuspend error: %+v", err)
-						time.Sleep(10 * time.Second)
-					}
-				}
-			}
-
-			log("Written %s time: %v, min: %v, hour: %v", sender, thetime, minCount, hourCount)
-		} else if !skipTime {
-			log("Ignoring %#v : %#v ||||| | %s | %s", sender, thetime.Format(time.RFC3339))
-			time.Sleep(2 * time.Second)
-		}
-		r = r + 1
-		if (r >= len(recipients)) {
+	senderDomain, err := emailDomainName(sender)
+	if err != nil {
+		return fmt.Errorf("unable to obtain domain from email %s, error: %v", sender, err.Error())
+	}
+	hasExternal := false
+	
+	r := 0
+	for {
+		if r >= len(recipients) {
 			break
 		}
+		recipient := recipients[r]
+		log("session %s: %s -> %s", sessionId, sender, recipient)
+		
+		recipientDomain, err := emailDomainName(recipient)
+
+		if err != nil {
+			log(fmt.Sprintf("unable to obtain domain from email %s, error: %v", err, recipient))
+			// return fmt.Errorf("unable to obtain domain from email %s, error: %v", err, recipient)
+			r = r + 1
+			continue
+		}
+		if senderDomain == recipientDomain {
+			log("detected same domain %s | %s", sender, recipient)
+			r = r + 1
+			continue
+		}
+		log("detected other domain %s | %s", recipientDomain, recipient)
+		hasExternal = true
+		r = r + 1
 	}
+
+	if hasExternal {
+		log("detected external recipient of %s", sender)
+		// time.Sleep(2 * time.Second)
+		minCount, hourCount, err := mailCount(thetime, sender)
+		if err != nil {
+			return err
+		}
+		
+		minCount++
+		hourCount++
+		//TODO save based on X recipients per email?
+
+		if err := mailCountStore(thetime, sender, hourCount, minCount); err != nil {
+			panic(fmt.Errorf("Unable to save count %s, time: %#v, error: %#v", sender, thetime, err))
+		}
+
+		if minCount > int64(maxPerMin) || hourCount > int64(maxPerHour) {
+			if err := whm.SuspendEmail(sender); err != nil {
+				log("Unable to suspendEmail %s, error: %+v", sender, err)
+				time.Sleep(5 * time.Second)
+			}
+
+			if notifyEmail != "" {
+				if err = notifySuspend(sender, fmt.Sprintf("Count: minute: %d, hour: %d", minCount, hourCount)); err != nil {
+					log("notifySuspend error: %+v", err)
+					time.Sleep(10 * time.Second)
+				}
+			}
+		}
+
+		log("Written %s time: %v, min: %v, hour: %v", sender, thetime, minCount, hourCount)
+	}
+	
+	log("Done session %s: %s -> %v", sessionId, sender, recipients)
 	time.Sleep(5 * time.Second)
 	return nil
 }
