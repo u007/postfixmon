@@ -106,17 +106,18 @@ func main() {
 		startTime = now
 	case "rerun":
 		if len(os.Args) < 3 {
-			log("rerun date/time")
+			log("rerun date/time, eg: 2022 oct 10")
 			return
 		}
-
-		thetime, err := tools.ParseDate(os.Args[2])
+		log("date? %v", os.Args)
+		dateStr := fmt.Sprintf("%s %s %s", os.Args[2], os.Args[3], os.Args[4])
+		thetime, err := tools.ParseDate(dateStr)
 		if err != nil {
-			panic(fmt.Errorf("Unable to read date: %#v", os.Args[2]))
+			panic(fmt.Errorf("Unable to read date: %#v", dateStr))
 		}
 		log("Rerun from: %s", thetime.Format(time.RFC3339))
 		if err := cleanupFrom(thetime); err != nil {
-			panic(fmt.Errorf("Unable to cleanup time: %+v", err))
+			log(fmt.Sprintf("Unable to cleanup time: %+v", err))
 		}
 
 		startTime = thetime
@@ -341,7 +342,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 	}
 
 	log("Starting line %d time: %v", lineNo, startTime.Format(time.RFC3339))
-	currentYear := fmt.Sprint("%s "time.Now().Year()) + " "
+	currentYear := fmt.Sprintf("%d ", time.Now().Year()) 
 	currentTimeStr := ""
 	currentSessionId := ""
 	currentSender := ""
@@ -382,7 +383,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 
 				log("currentYear: %s", currentYear)
 				
-				currentTimeStr = res[1]
+				currentTimeStr = currentYear + res[1]
 				currentSender = res[4]
 				currentSessionId = res[2]
 				currentRecipients = []string{}
@@ -393,7 +394,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 					return err
 				}
 				if currentDateTime.After(time.Now().Add(1 * time.Hour)) {
-					currentTimeStr = string(time.Now().Year()-1) + " "+ res[1]
+					currentTimeStr = fmt.Sprintf("%d %s", time.Now().Year(), res[1])
 				}
 
 			} else if (res[3] == "to") {
@@ -426,8 +427,10 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 	}
 
 	log("ended: line %d", lineNo)
-
-	lastPrefix = text[0:25]
+	lastPrefix = text
+	if (len(text) > 25) {
+		lastPrefix = text[0:25]
+	}
 
 	storeConfig(logFile, newSize, lineNo, lastPrefix)
 	return nil
@@ -440,7 +443,7 @@ func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 	log("Processing session %s: %s -> %v", sessionId, sender, recipients)
 	for {
 		recipient := recipients[r]
-		log("Processing session %s: %s -> %s", sessionId, sender, recipient)
+		log("session %s: %s -> %s", sessionId, sender, recipient)
 		process := false
 		skipTime := false
 		var thetime time.Time
@@ -527,6 +530,9 @@ func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 			time.Sleep(2 * time.Second)
 		}
 		r = r + 1
+		if (r >= len(recipients)) {
+			break
+		}
 	}
 	time.Sleep(5 * time.Second)
 	return nil
