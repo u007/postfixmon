@@ -1,5 +1,7 @@
 build:
-	go build -o bin/postfixmon main.go
+	# go build -o bin/postfixmon main.go
+	env GOOS=linux GOARCH=amd64 go build -o bin/
+
 
 run:
 	API_TOKEN=aaa go run main.go reset
