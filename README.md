@@ -32,6 +32,15 @@ API_TOKEN=xxxxx NOTIFY_EMAIL=your-email PF_LOG=/var/log/main.log ./postfixmon st
 tail -f /root/postfixmon/out.log
 ```
 
+* to ignore / whitelist email address
+
+vi skip.conf
+
+```
+xyz@example.com
+*@example.com
+```
+
 * for helps
 
 ```
