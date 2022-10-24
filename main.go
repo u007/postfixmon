@@ -281,6 +281,15 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 		lastPrefix = strings.TrimRight(lastPrefix, "\n")
 	}
 
+	ignoreList := []string{}
+	if (tools.FileExists("skip.conf")) {
+		var err error
+		ignoreList, err = tools.ReadContentAsList("skip.conf")
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	newSize := MustSize(logFile)
 	file, err := os.Open(logFile)
 	if err != nil {
@@ -375,7 +384,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 				if (currentSender != "" && len(currentRecipients) > 0) {
 					log("Executing session: %s", currentSessionId)
 
-					err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId, currentSender, currentRecipients, startTime, currentTimeStr)
+					err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId, currentSender, currentRecipients, startTime, currentTimeStr, ignoreList)
 					if (err != nil) {
 						log("Error processing session %s: %s", currentSessionId, err)
 					}
@@ -416,7 +425,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 				log("Executing final session: %s", currentSessionId)
 
 				if err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId,
-					currentSender, currentRecipients, startTime, currentTimeStr); err != nil {
+					currentSender, currentRecipients, startTime, currentTimeStr, ignoreList); err != nil {
 					log("Error processing session %s: %s", currentSessionId, err)
 				}
 			}
@@ -438,7 +447,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 
 func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 	sessionId string, sender string, recipients []string,
-	startTime time.Time, timeStr string) error {
+	startTime time.Time, timeStr string, ignoreList []string) error {
 	log("Processing session %s: %s -> %v", sessionId, sender, recipients)
 	
 	var thetime time.Time
@@ -465,9 +474,33 @@ func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 	}
 
 	process := strings.Index(sender, "@") > 0
+	if process {
+		for _, ignore := range ignoreList {
+			if strings.HasPrefix(ignore, "*") {
+				if strings.HasSuffix(sender, ignore[1:]) {
+					process = false
+					break
+				}
+			}
+
+			if strings.HasSuffix(ignore, "*") {
+				if strings.HasSuffix(sender, ignore[:1]) {
+					process = false
+					break
+				}
+			}
+
+			if !strings.HasPrefix(ignore, "*") && !strings.HasSuffix(ignore, "*") {
+				if sender == ignore {
+					process = false
+					break
+				}
+			}
+		}
+	}
 	
 	if (!process && !skipTime) {
-		log("Ignoring session %s %#v : %#v ||||| | %s | %s", sessionId, sender, thetime.Format(time.RFC3339))
+		log("Ignoring session %s %#v : %#v", sessionId, sender, thetime.Format(time.RFC3339))
 		time.Sleep(2 * time.Second)
 		return nil
 	}
@@ -538,7 +571,7 @@ func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 	}
 	
 	log("Done session %s: %s -> %v", sessionId, sender, recipients)
-	time.Sleep(5 * time.Second)
+	time.Sleep(1 * time.Second)
 	return nil
 }
 

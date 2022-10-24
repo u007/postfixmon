@@ -1,10 +1,35 @@
 package tools
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+func FileExists(path string) bool {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return true
+}
+
+func ReadContentAsList(path string) ([]string, error) {
+	var content []string
+	file, err := os.Open(path)
+	if err != nil {
+		return content, err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		content = append(content, scanner.Text())
+	}
+
+	return content, scanner.Err()
+}
 
 func RemoveSubFileFolder(dir string) error {
 	d, err := os.Open(dir)
