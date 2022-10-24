@@ -1,3 +1,4 @@
 mail.log
 data/
 .config
+*.log

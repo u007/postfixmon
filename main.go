@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -31,7 +32,8 @@ Oct 22 17:48:42 vmi673390 postfix/smtp[183182]: 3B838E03CA: to=<c00lways@gmail.c
 Oct 22 17:48:42 vmi673390 postfix/smtp[183182]: 3B838E03CA: to=<james@mercstudio.com>, relay=mail.smtp2go.com[45.79.71.155]:2525, delay=2.3, delays=0.05/0.01/1.7/0.62, dsn=2.0.0, status=sent (250 OK id=1omB7Q-DvC2hB-2l)
 
 */
-var postfixRegLine = regexp.MustCompile("(?i)^([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*): (from|to)=<([a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,4})>,.*$")
+// var postfixRegLine = regexp.MustCompile("(?i)([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*):.*$")
+var postfixRegLine = regexp.MustCompile("(?i)([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*): (from|to)=<([a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,4})>,.*$")
 // var postfixRegLine = regexp.MustCompile("(?i)(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) ([^ ]*) ([^ ]*) .* A=dovecot_[a-zA-z]*:([^ ]*) (.*) for (.*)$")
 var notifyEmail = ""
 
@@ -339,7 +341,8 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 	}
 
 	log("Starting line %d time: %v", lineNo, startTime.Format(time.RFC3339))
-
+	currentYear := fmt.Sprint("%s "time.Now().Year()) + " "
+	currentTimeStr := ""
 	currentSessionId := ""
 	currentSender := ""
 	currentRecipients := []string{}
@@ -348,47 +351,71 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 		log("raw line %d: %v", lineNo, text)
 		res := postfixRegLine.FindStringSubmatch(text)
 		// 0 = datetime, 1 = session-id, 2 = from/to, 3 = email
-		if len(res) < 4 {
+		debugList := res
+		if (res != nil) {
+			debugList = res[1:]
+		}
+		jsonStuff, _ := json.Marshal(debugList)
+		log("res!!!!!!: count %d %s", len(res), string(jsonStuff))
+		// 0 - fullline
+		// 1 - date
+		// 2 - session id
+		// 3 - from/to
+		// 4 - email
+		if len(res) < 5 {
 			// if strings.Contains(text, "A=dovecot") {
 			// log("Not: %#v | %v", res, text)
 			// 	time.Sleep(100 * time.Millisecond)
 			// }
 		} else {
-			if (res[2] == "from") {
+			if (res[3] == "from") {
 
 				// execute last batch session
 				if (currentSender != "" && len(currentRecipients) > 0) {
 					log("Executing session: %s", currentSessionId)
 
-					err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId, currentSender, currentRecipients, startTime, res[0])
+					err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId, currentSender, currentRecipients, startTime, currentTimeStr)
 					if (err != nil) {
 						log("Error processing session %s: %s", currentSessionId, err)
 					}
 				}
 
-				currentSender = res[2]
-				currentSessionId = res[1]
+				log("currentYear: %s", currentYear)
+				
+				currentTimeStr = res[1]
+				currentSender = res[4]
+				currentSessionId = res[2]
 				currentRecipients = []string{}
-				continue
-			} else if (res[2] == "to") {
-				// check session id
-				if (currentSessionId != res[1]) {
-					log("Session id mismatch: %s != %s", currentSessionId, res[1])
-					continue
+
+				currentDateTime, err := tools.ParseDate(currentTimeStr)
+				if err != nil {
+					log("Error parsing date: %s", currentTimeStr)
+					return err
+				}
+				if currentDateTime.After(time.Now().Add(1 * time.Hour)) {
+					currentTimeStr = string(time.Now().Year()-1) + " "+ res[1]
 				}
 
-				currentRecipients = append(currentRecipients, res[3])
+			} else if (res[3] == "to") {
+				// check session id, otherwise ignore
+				if (currentSessionId != res[2]) {
+					log("Session id mismatch: %s != %s", currentSessionId, res[2])
+				} else {
+					currentRecipients = append(currentRecipients, res[4])
+				}
+				
 			} else {
 				log("Not regex: %#v | %v", res, text)
 			}
 		}
+		// log("read line %d", lineNo)
 		if !scanner.Scan() {
 			// log("scanned ended: line %d", lineNo)
 			if (currentSender != "" && len(currentRecipients) > 0) {
 				log("Executing final session: %s", currentSessionId)
 
-				err := processSession(maxPerMin, maxPerHour, currentSessionId, currentSender, currentRecipients, startTime, res[0])
-				if (err != nil) {
+				if err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId,
+					currentSender, currentRecipients, startTime, currentTimeStr); err != nil {
 					log("Error processing session %s: %s", currentSessionId, err)
 				}
 			}
@@ -406,13 +433,14 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 	return nil
 }
 
-func processSession(maxPerMin int64, maxPerHour int64, lineNo int16,
+func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 	sessionId string, sender string, recipients []string,
-	startTime time.Time, timeStr string) {
+	startTime time.Time, timeStr string) error {
 	r := 0
+	log("Processing session %s: %s -> %v", sessionId, sender, recipients)
 	for {
 		recipient := recipients[r]
-
+		log("Processing session %s: %s -> %s", sessionId, sender, recipient)
 		process := false
 		skipTime := false
 		var thetime time.Time
@@ -451,10 +479,12 @@ func processSession(maxPerMin int64, maxPerHour int64, lineNo int16,
 				if err != nil {
 					log(fmt.Sprintf("unable to obtain domain from email %s, error: %v", err, rec))
 					// return fmt.Errorf("unable to obtain domain from email %s, error: %v", err, recipient)
+					r = r + 1
 					continue
 				}
 				if senderDomain == recipientDomain {
 					log("detected same domain %s | %s", sender, rec)
+					r = r + 1
 					continue
 				}
 				log("detected other domain %s | %s", recipientDomain, rec)
@@ -498,6 +528,7 @@ func processSession(maxPerMin int64, maxPerHour int64, lineNo int16,
 		}
 		r = r + 1
 	}
+	time.Sleep(5 * time.Second)
 	return nil
 }
 
