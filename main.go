@@ -3,14 +3,16 @@ package main
 import (
 	"bufio"
 	"bytes"
-	"postfixmon/tools"
-	"postfixmon/whm"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"postfixmon/tools"
+	"postfixmon/virtualmin"
+	"postfixmon/whm"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,17 +23,40 @@ var configPath = ".config"
 var dataPath = "data/"
 
 // date, id, <=, email, extras
-var postfixRegLine = regexp.MustCompile("(?i)(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) ([^ ]*) ([^ ]*) .* A=dovecot_[a-zA-z]*:([^ ]*) (.*) for (.*)$")
+/*
+Oct 22 17:48:40 vmi673390 postfix/trivial-rewrite[183180]: warning: do not list domain s12.mercstudio.com in BOTH mydestination and virtual_alias_domains
+Oct 22 17:48:40 vmi673390 postfix/smtpd[183177]: 3B838E03CA: client=localhost[127.0.0.1]
+Oct 22 17:48:40 vmi673390 postfix/cleanup[183181]: 3B838E03CA: message-id=<1666432120.183174@s12.mercstudio.com>
+Oct 22 17:48:40 vmi673390 postfix/qmgr[183159]: 3B838E03CA: from=<james@s12.mercstudio.com>, size=688, nrcpt=2 (queue active)
+Oct 22 17:48:40 vmi673390 postfix/smtpd[183177]: disconnect from localhost[127.0.0.1] helo=1 mail=1 rcpt=2 data=1 quit=1 commands=6
+Oct 22 17:48:42 vmi673390 postfix/smtp[183182]: 3B838E03CA: to=<c00lways@gmail.com>, relay=mail.smtp2go.com[45.79.71.155]:2525, delay=2.3, delays=0.05/0.01/1.7/0.62, dsn=2.0.0, status=sent (250 OK id=1omB7Q-DvC2hB-2l)
+Oct 22 17:48:42 vmi673390 postfix/smtp[183182]: 3B838E03CA: to=<james@mercstudio.com>, relay=mail.smtp2go.com[45.79.71.155]:2525, delay=2.3, delays=0.05/0.01/1.7/0.62, dsn=2.0.0, status=sent (250 OK id=1omB7Q-DvC2hB-2l)
+
+*/
+// var postfixRegLine = regexp.MustCompile("(?i)([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*):.*$")
+var postfixRegLine = regexp.MustCompile("(?i)([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*): (from|to)=<([a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,4})>,.*$")
+// var postfixRegLine = regexp.MustCompile("(?i)(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) ([^ ]*) ([^ ]*) .* A=dovecot_[a-zA-z]*:([^ ]*) (.*) for (.*)$")
 var notifyEmail = ""
+
+func getEnv(key, defaultValue string) string {
+    value := os.Getenv(key)
+    if len(value) == 0 {
+        return defaultValue
+    }
+    return value
+}
+
 
 func main() {
 	logFile := "mail.log"
-	whm.ApiToken = os.Getenv("API_TOKEN")
-	if whm.ApiToken == "" {
+	serverType := getEnv("SERVERTYPE", "virtualmin")
+	whm.ApiToken = getEnv("API_TOKEN", "")
+	if whm.ApiToken == "" && serverType == "cpanel" {
 		log("Please declare -x API_TOKEN=...")
 		log("Other environments variables: MAX_PER_MIN=8 , MAX_PER_HOUR=100")
 		log("NOTIFY_EMAIL=email , PF_LOG=/var/log/mail.log")
 		log("WHM_API_HOST=127.0.0.1")
+		log("SERVERTYPE=cpanel")
 	}
 
 	maxPerMin := int16(8)
@@ -68,6 +93,7 @@ func main() {
 	}
 
 	whm.Log = log
+	virtualmin.Log = log
 
 	if len(os.Args) < 2 {
 		log("args: start|run|skip|reset|suspend|unsuspend|info|help|test-notify|rerun")
@@ -93,17 +119,18 @@ func main() {
 		startTime = now
 	case "rerun":
 		if len(os.Args) < 3 {
-			log("rerun date/time")
+			log("rerun date/time, eg: 2022 oct 10")
 			return
 		}
-
-		thetime, err := tools.ParseDate(os.Args[2])
+		log("date? %v", os.Args)
+		dateStr := fmt.Sprintf("%s %s %s", os.Args[2], os.Args[3], os.Args[4])
+		thetime, err := tools.ParseDate(dateStr)
 		if err != nil {
-			panic(fmt.Errorf("Unable to read date: %#v", os.Args[2]))
+			panic(fmt.Errorf("Unable to read date: %#v", dateStr))
 		}
 		log("Rerun from: %s", thetime.Format(time.RFC3339))
 		if err := cleanupFrom(thetime); err != nil {
-			panic(fmt.Errorf("Unable to cleanup time: %+v", err))
+			log(fmt.Sprintf("Unable to cleanup time: %+v", err))
 		}
 
 		startTime = thetime
@@ -117,8 +144,15 @@ func main() {
 			return
 		}
 		email := os.Args[2]
-		if err := whm.SuspendEmail(email); err != nil {
-			panic(fmt.Sprintf("error: %+v", err))
+		if serverType == "cpanel" {
+			if err := whm.SuspendEmail(email); err != nil {
+				panic(fmt.Sprintf("error: %+v", err))
+			}
+		}
+		if serverType == "virtualmin" {
+			if err := virtualmin.SuspendEmail(email); err != nil {
+				panic(fmt.Sprintf("error: %+v", err))
+			}
 		}
 
 		log("Suspended %s", email)
@@ -130,7 +164,7 @@ func main() {
 		}
 
 		email := os.Args[2]
-		if err := whm.UnSuspendEmail(email); err != nil {
+		if err := virtualmin.EnableEmail(email); err != nil {
 			panic(fmt.Sprintf("error: %+v", err))
 		}
 		log("Unsuspended %s", email)
@@ -140,6 +174,9 @@ func main() {
 		if len(os.Args) < 3 {
 			log("info [domain]")
 			return
+		}
+		if serverType == "virtualmin" {
+			panic(fmt.Errorf("Not implemented"))
 		}
 		info, err := whm.UserDataInfo(os.Args[2])
 		if err != nil {
@@ -267,6 +304,15 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 		lastPrefix = strings.TrimRight(lastPrefix, "\n")
 	}
 
+	ignoreList := []string{}
+	if (tools.FileExists("skip.conf")) {
+		var err error
+		ignoreList, err = tools.ReadContentAsList("skip.conf")
+		if err != nil {
+			panic(err)
+		}
+	}
+
 	newSize := MustSize(logFile)
 	file, err := os.Open(logFile)
 	if err != nil {
@@ -328,120 +374,227 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 	}
 
 	log("Starting line %d time: %v", lineNo, startTime.Format(time.RFC3339))
-
+	currentYear := fmt.Sprintf("%d ", time.Now().Year()) 
+	currentTimeStr := ""
+	currentSessionId := ""
+	currentSender := ""
+	currentRecipients := []string{}
 	for {
 		text = scanner.Text()
 		log("raw line %d: %v", lineNo, text)
 		res := postfixRegLine.FindStringSubmatch(text)
+		// 0 = datetime, 1 = session-id, 2 = from/to, 3 = email
+		debugList := res
+		if (res != nil) {
+			debugList = res[1:]
+		}
+		jsonStuff, _ := json.Marshal(debugList)
+		log("res!!!!!!: count %d %s", len(res), string(jsonStuff))
+		// 0 - fullline
+		// 1 - date
+		// 2 - session id
+		// 3 - from/to
+		// 4 - email
 		if len(res) < 5 {
-			if strings.Contains(text, "A=dovecot") {
-				log("Not: %#v | %v", res, text)
-				time.Sleep(100 * time.Millisecond)
-			}
+			// if strings.Contains(text, "A=dovecot") {
+			// log("Not: %#v | %v", res, text)
+			// 	time.Sleep(100 * time.Millisecond)
+			// }
 		} else {
-			if res[3] == "<=" {
-				email := res[4] //login owner
-				recipient := res[6]
-				process := false
-				skipTime := false
-				var thetime time.Time
-				var err error
-				var senderDomain string
-				var recipientDomain string
+			if (res[3] == "from") {
 
-				thetime, err = tools.ParseDate(res[1])
+				// execute last batch session
+				if (currentSender != "" && len(currentRecipients) > 0) {
+					log("Executing session: %s", currentSessionId)
+
+					err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId, currentSender, currentRecipients, startTime, currentTimeStr, ignoreList)
+					if (err != nil) {
+						log("Error processing session %s: %s", currentSessionId, err)
+					}
+				}
+
+				log("currentYear: %s", currentYear)
+				
+				currentTimeStr = currentYear + res[1]
+				currentSender = res[4]
+				currentSessionId = res[2]
+				currentRecipients = []string{}
+
+				currentDateTime, err := tools.ParseDate(currentTimeStr)
 				if err != nil {
-					panic(fmt.Errorf("Unable to read date: %#v on line %d", thetime, lineNo))
+					log("Error parsing date: %s", currentTimeStr)
+					return err
 				}
-				if !startTime.IsZero() {
-					if thetime.Before(startTime) {
-						log("Skipping by time %s expected %s", thetime.Format(time.RFC3339), startTime.Format(time.RFC3339))
-						skipTime = true
-					} else {
-						// log("ok time %s(%s) after %s", thetime.Format(time.RFC3339), res[1], startTime.Format(time.RFC3339))
-					}
+				if currentDateTime.After(time.Now().Add(1 * time.Hour)) {
+					currentTimeStr = fmt.Sprintf("%d %s", time.Now().Year(), res[1])
+				}
+
+			} else if (res[3] == "to") {
+				// check session id, otherwise ignore
+				if (currentSessionId != res[2]) {
+					log("Session id mismatch: %s != %s", currentSessionId, res[2])
 				} else {
-					log("Start time is zero? %s", startTime.Format(time.RFC3339))
+					currentRecipients = append(currentRecipients, res[4])
 				}
-
-				if !skipTime && strings.Index(email, "@") > 0 {
-					process = true
-				} //is email
-
-				if process {
-					senderDomain, err = emailDomainName(email)
-					if err != nil {
-						return fmt.Errorf("unable to obtain domain from email %s, error: %v", err, email)
-					}
-					hasExternal := false
-					recipients := strings.Split(recipient, " ")
-					for _, rec := range recipients {
-						recipientDomain, err = emailDomainName(rec)
-						if err != nil {
-							log(fmt.Sprintf("unable to obtain domain from email %s, error: %v", err, rec))
-							// return fmt.Errorf("unable to obtain domain from email %s, error: %v", err, recipient)
-							continue
-						}
-						if senderDomain == recipientDomain {
-							log("detected same domain %s | %s", email, rec)
-							continue
-						}
-						log("detected other domain %s | %s", recipientDomain, rec)
-						hasExternal = true
-					}
-
-					process = hasExternal
-				}
-
-				if process {
-					minCount, hourCount, err := mailCount(thetime, email)
-					if err != nil {
-						return err
-					}
-					minCount++
-					hourCount++
-					//TODO save based on X recipients per email?
-
-					if err := mailCountStore(thetime, email, hourCount, minCount); err != nil {
-						panic(fmt.Errorf("Unable to save count %s, time: %#v, error: %#v", email, thetime, err))
-					}
-
-					if minCount > int64(maxPerMin) || hourCount > int64(maxPerHour) {
-						if err := whm.SuspendEmail(email); err != nil {
-							log("Unable to suspendEmail %s, error: %+v", email, err)
-							time.Sleep(5 * time.Second)
-						}
-
-						if notifyEmail != "" {
-							if err = notifySuspend(email, fmt.Sprintf("Count: minute: %d, hour: %d", minCount, hourCount)); err != nil {
-								log("notifySuspend error: %+v", err)
-								time.Sleep(10 * time.Second)
-							}
-						}
-					}
-
-					log("Written %s time: %v, min: %v, hour: %v", email, thetime, minCount, hourCount)
-				} else if !skipTime {
-					log("Ignoring %#v : %#v ||||| '%s' | %s | %s", len(res), res[1:], email, thetime.Format(time.RFC3339), text)
-					time.Sleep(2 * time.Second)
-				}
-				//is <=
+				
 			} else {
 				log("Not regex: %#v | %v", res, text)
 			}
 		}
+		// log("read line %d", lineNo)
 		if !scanner.Scan() {
 			// log("scanned ended: line %d", lineNo)
+			if (currentSender != "" && len(currentRecipients) > 0) {
+				log("Executing final session: %s", currentSessionId)
+
+				if err := processSession(maxPerMin, maxPerHour, lineNo, currentSessionId,
+					currentSender, currentRecipients, startTime, currentTimeStr, ignoreList); err != nil {
+					log("Error processing session %s: %s", currentSessionId, err)
+				}
+			}
+
 			break
 		}
 		lineNo++
 	}
 
 	log("ended: line %d", lineNo)
-
-	lastPrefix = text[0:25]
+	lastPrefix = text
+	if (len(text) > 25) {
+		lastPrefix = text[0:25]
+	}
 
 	storeConfig(logFile, newSize, lineNo, lastPrefix)
+	return nil
+}
+
+func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
+	sessionId string, sender string, recipients []string,
+	startTime time.Time, timeStr string, ignoreList []string) error {
+	log("Processing session %s: %s -> %v", sessionId, sender, recipients)
+	
+	var thetime time.Time
+	var err error
+	skipTime := false
+	thetime, err = tools.ParseDate(timeStr)
+	if err != nil {
+		panic(fmt.Errorf("Unable to read date: %#v on line %d", thetime, lineNo))
+	}
+	if !startTime.IsZero() {
+		if thetime.Before(startTime) {
+			log("Skipping by time %s expected %s", thetime.Format(time.RFC3339), startTime.Format(time.RFC3339))
+			skipTime = true
+		} else {
+			// log("ok time %s(%s) after %s", thetime.Format(time.RFC3339), res[1], startTime.Format(time.RFC3339))
+		}
+	} else {
+		log("Start time is zero? %s", startTime.Format(time.RFC3339))
+	}
+
+	if (skipTime) {
+		log("Skiptime session %s: %s -> %v", sessionId, sender, recipients)
+		return nil
+	}
+
+	process := strings.Index(sender, "@") > 0
+	if process {
+		for _, ignore := range ignoreList {
+			if strings.HasPrefix(ignore, "*") {
+				if strings.HasSuffix(sender, ignore[1:]) {
+					process = false
+					break
+				}
+			}
+
+			if strings.HasSuffix(ignore, "*") {
+				if strings.HasSuffix(sender, ignore[:1]) {
+					process = false
+					break
+				}
+			}
+
+			if !strings.HasPrefix(ignore, "*") && !strings.HasSuffix(ignore, "*") {
+				if sender == ignore {
+					process = false
+					break
+				}
+			}
+		}
+	}
+	
+	if (!process && !skipTime) {
+		log("Ignoring session %s %#v : %#v", sessionId, sender, thetime.Format(time.RFC3339))
+		time.Sleep(2 * time.Second)
+		return nil
+	}
+
+	senderDomain, err := emailDomainName(sender)
+	if err != nil {
+		return fmt.Errorf("unable to obtain domain from email %s, error: %v", sender, err.Error())
+	}
+	hasExternal := false
+	
+	r := 0
+	for {
+		if r >= len(recipients) {
+			break
+		}
+		recipient := recipients[r]
+		log("session %s: %s -> %s", sessionId, sender, recipient)
+		
+		recipientDomain, err := emailDomainName(recipient)
+
+		if err != nil {
+			log(fmt.Sprintf("unable to obtain domain from email %s, error: %v", err, recipient))
+			// return fmt.Errorf("unable to obtain domain from email %s, error: %v", err, recipient)
+			r = r + 1
+			continue
+		}
+		if senderDomain == recipientDomain {
+			log("detected same domain %s | %s", sender, recipient)
+			r = r + 1
+			continue
+		}
+		log("detected other domain %s | %s", recipientDomain, recipient)
+		hasExternal = true
+		r = r + 1
+	}
+
+	if hasExternal {
+		log("detected external recipient of %s", sender)
+		// time.Sleep(2 * time.Second)
+		minCount, hourCount, err := mailCount(thetime, sender)
+		if err != nil {
+			return err
+		}
+		
+		minCount++
+		hourCount++
+		//TODO save based on X recipients per email?
+
+		if err := mailCountStore(thetime, sender, hourCount, minCount); err != nil {
+			panic(fmt.Errorf("Unable to save count %s, time: %#v, error: %#v", sender, thetime, err))
+		}
+
+		if minCount > int64(maxPerMin) || hourCount > int64(maxPerHour) {
+			if err := virtualmin.SuspendEmail(sender); err != nil {
+				log("Unable to suspendEmail %s, error: %+v", sender, err)
+				time.Sleep(5 * time.Second)
+			}
+
+			if notifyEmail != "" {
+				if err = notifySuspend(sender, fmt.Sprintf("Count: minute: %d, hour: %d", minCount, hourCount)); err != nil {
+					log("notifySuspend error: %+v", err)
+					time.Sleep(10 * time.Second)
+				}
+			}
+		}
+
+		log("Written %s time: %v, min: %v, hour: %v", sender, thetime, minCount, hourCount)
+	}
+	
+	log("Done session %s: %s -> %v", sessionId, sender, recipients)
+	time.Sleep(1 * time.Second)
 	return nil
 }
 
