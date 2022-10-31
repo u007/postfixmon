@@ -17,7 +17,7 @@ rerun:
 
 upload:
 	make build
-	ssh -t $(USER)@$(SERVER) "pkill postfixmon & true"
+	ssh -t $(USER)@$(SERVER) "pkill postfixmon" & true
 	scp bin/postfixmon $(USER)@$(SERVER):/root/postfixmon/
 
 testdeploy: upload

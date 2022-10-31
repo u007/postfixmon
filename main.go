@@ -46,6 +46,28 @@ func getEnv(key, defaultValue string) string {
     return value
 }
 
+func parseDateWithoutCurrentYear(date string) (string, error) {
+	return parseDateWithoutYear(date, time.Now().Year())
+}
+
+func parseDateWithoutYear(date string, runningYear int) (string, error) {
+	currentYear := fmt.Sprintf("%d ", runningYear) 
+	currentTimeStr := currentYear + date
+
+	currentDateTime, err := tools.ParseDate(currentTimeStr)
+	if err != nil {
+		log("Unable to read lastPrefix date: %#v on line %d", currentDateTime, date)
+		// panic(fmt.Errorf("Unable to read lastPrefix date: %#v on line %d", startTime, lastPrefix))
+		currentDateTime = time.Now()
+	}
+
+	if currentDateTime.After(time.Now().Add(1 * time.Hour)) {
+		// aYearAgo, _ := time.ParseDuration("-1y")
+		currentTimeStr = fmt.Sprintf("%d %s", runningYear-1, date)
+	}
+	log("date b4: %s, date after: %s", date, currentTimeStr)
+	return currentTimeStr, nil
+}
 
 func main() {
 	logFile := getEnv("PF_LOG", "/var/log/mail.log")
@@ -326,8 +348,12 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 
 	if lastPrefix != "" {
 		var err error
-		log("parsing last time: %s", lastPrefix[:19])
-		startTime, err = tools.ParseDate(lastPrefix[:19])
+		currentTimeStr, err := parseDateWithoutCurrentYear(lastPrefix[:16])
+		if (err != nil) {
+			panic(fmt.Errorf("unable to format date %s", lastPrefix[:16]))
+		}
+		log("parsing last time: %s", currentTimeStr)
+		startTime, err = tools.ParseDate(currentTimeStr)
 		if err != nil {
 			log("Unable to read lastPrefix date: %#v on line %d", startTime, lastPrefix)
 			// panic(fmt.Errorf("Unable to read lastPrefix date: %#v on line %d", startTime, lastPrefix))
@@ -374,7 +400,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 	}
 
 	log("Starting line %d time: %v", lineNo, startTime.Format(time.RFC3339))
-	currentYear := fmt.Sprintf("%d ", time.Now().Year()) 
+	currentYear := time.Now().Year()
 	currentTimeStr := ""
 	currentSessionId := ""
 	currentSender := ""
@@ -413,9 +439,9 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 					}
 				}
 
-				log("currentYear: %s", currentYear)
+				log("currentYear: %d", currentYear)
 				
-				currentTimeStr = currentYear + res[1]
+				currentTimeStr, _ = parseDateWithoutYear(res[1], currentYear)
 				currentSender = res[4]
 				currentSessionId = res[2]
 				currentRecipients = []string{}
@@ -425,9 +451,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 					log("Error parsing date: %s", currentTimeStr)
 					return err
 				}
-				if currentDateTime.After(time.Now().Add(1 * time.Hour)) {
-					currentTimeStr = fmt.Sprintf("%d %s", time.Now().Year(), res[1])
-				}
+				currentYear = currentDateTime.Year()
 
 			} else if (res[3] == "to") {
 				// check session id, otherwise ignore
