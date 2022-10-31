@@ -389,7 +389,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 			debugList = res[1:]
 		}
 		jsonStuff, _ := json.Marshal(debugList)
-		log("res!!!!!!: count %d %s", len(res), string(jsonStuff))
+		log("regex: count %d %s", len(res), string(jsonStuff))
 		// 0 - fullline
 		// 1 - date
 		// 2 - session id
