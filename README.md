@@ -53,6 +53,7 @@ xyz@example.com
 * NOTIFY_EMAIL=email
 * PF_LOG=/var/log/mail.log
 * WHM_API_HOST=node.servername.com
+* SERVERTYPE=virtualmin/cpanel
 
 ## Available command
 

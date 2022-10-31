@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"postfixmon/tools"
+	"postfixmon/virtualmin"
 	"postfixmon/whm"
 	"regexp"
 	"strconv"
@@ -37,14 +38,25 @@ var postfixRegLine = regexp.MustCompile("(?i)([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-
 // var postfixRegLine = regexp.MustCompile("(?i)(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) ([^ ]*) ([^ ]*) .* A=dovecot_[a-zA-z]*:([^ ]*) (.*) for (.*)$")
 var notifyEmail = ""
 
+func getEnv(key, defaultValue string) string {
+    value := os.Getenv(key)
+    if len(value) == 0 {
+        return defaultValue
+    }
+    return value
+}
+
+
 func main() {
 	logFile := "mail.log"
-	whm.ApiToken = os.Getenv("API_TOKEN")
-	if whm.ApiToken == "" {
+	serverType := getEnv("SERVERTYPE", "virtualmin")
+	whm.ApiToken = getEnv("API_TOKEN", "")
+	if whm.ApiToken == "" && serverType == "cpanel" {
 		log("Please declare -x API_TOKEN=...")
 		log("Other environments variables: MAX_PER_MIN=8 , MAX_PER_HOUR=100")
 		log("NOTIFY_EMAIL=email , PF_LOG=/var/log/mail.log")
 		log("WHM_API_HOST=127.0.0.1")
+		log("SERVERTYPE=cpanel")
 	}
 
 	maxPerMin := int16(8)
@@ -81,6 +93,7 @@ func main() {
 	}
 
 	whm.Log = log
+	virtualmin.Log = log
 
 	if len(os.Args) < 2 {
 		log("args: start|run|skip|reset|suspend|unsuspend|info|help|test-notify|rerun")
@@ -131,8 +144,15 @@ func main() {
 			return
 		}
 		email := os.Args[2]
-		if err := whm.SuspendEmail(email); err != nil {
-			panic(fmt.Sprintf("error: %+v", err))
+		if serverType == "cpanel" {
+			if err := whm.SuspendEmail(email); err != nil {
+				panic(fmt.Sprintf("error: %+v", err))
+			}
+		}
+		if serverType == "virtualmin" {
+			if err := virtualmin.SuspendEmail(email); err != nil {
+				panic(fmt.Sprintf("error: %+v", err))
+			}
 		}
 
 		log("Suspended %s", email)
@@ -144,7 +164,7 @@ func main() {
 		}
 
 		email := os.Args[2]
-		if err := whm.UnSuspendEmail(email); err != nil {
+		if err := virtualmin.EnableEmail(email); err != nil {
 			panic(fmt.Sprintf("error: %+v", err))
 		}
 		log("Unsuspended %s", email)
@@ -154,6 +174,9 @@ func main() {
 		if len(os.Args) < 3 {
 			log("info [domain]")
 			return
+		}
+		if serverType == "virtualmin" {
+			panic(fmt.Errorf("Not implemented"))
 		}
 		info, err := whm.UserDataInfo(os.Args[2])
 		if err != nil {
@@ -554,7 +577,7 @@ func processSession(maxPerMin int16, maxPerHour int16, lineNo int64,
 		}
 
 		if minCount > int64(maxPerMin) || hourCount > int64(maxPerHour) {
-			if err := whm.SuspendEmail(sender); err != nil {
+			if err := virtualmin.SuspendEmail(sender); err != nil {
 				log("Unable to suspendEmail %s, error: %+v", sender, err)
 				time.Sleep(5 * time.Second)
 			}
