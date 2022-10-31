@@ -1,5 +1,6 @@
 USER=root
 SERVER=example.com
+include .env
 
 build:
 	# go build -o bin/postfixmon main.go

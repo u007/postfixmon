@@ -2,3 +2,4 @@ mail.log
 data/
 .config
 *.log
+.env
