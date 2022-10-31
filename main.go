@@ -56,16 +56,16 @@ func parseDateWithoutYear(date string, runningYear int) (string, error) {
 
 	currentDateTime, err := tools.ParseDate(currentTimeStr)
 	if err != nil {
-		log("Unable to read lastPrefix date: %#v on line %d", currentDateTime, date)
+		log("parseDateWithoutYear: Unable to read lastPrefix date: %#v on line %d", currentDateTime, date)
 		// panic(fmt.Errorf("Unable to read lastPrefix date: %#v on line %d", startTime, lastPrefix))
 		currentDateTime = time.Now()
 	}
-
+	// sometimes the log is from the previous year
 	if currentDateTime.After(time.Now().Add(1 * time.Hour)) {
 		// aYearAgo, _ := time.ParseDuration("-1y")
 		currentTimeStr = fmt.Sprintf("%d %s", runningYear-1, date)
 	}
-	log("date b4: %s, date after: %s", date, currentTimeStr)
+	// log("date b4: %s, date after: %s", date, currentTimeStr)
 	return currentTimeStr, nil
 }
 
@@ -355,7 +355,7 @@ func postfixLogScanner(logFile string, startTime time.Time, maxPerMin int16, max
 		log("parsing last time: %s", currentTimeStr)
 		startTime, err = tools.ParseDate(currentTimeStr)
 		if err != nil {
-			log("Unable to read lastPrefix date: %#v on line %d", startTime, lastPrefix)
+			log("Unable to read lastPrefix date: %#v on line '%s' parsing: '%s'", startTime, lastPrefix, currentTimeStr)
 			// panic(fmt.Errorf("Unable to read lastPrefix date: %#v on line %d", startTime, lastPrefix))
 			startTime = time.Now()
 		}
