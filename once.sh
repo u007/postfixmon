@@ -1,0 +1,1 @@
+cd /root/postfixmon && NOTIFY_EMAIL=name@example.com MAX_PER_MIN=12 ./postfixmon rerun 2022 Nov 1

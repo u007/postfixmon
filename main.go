@@ -34,7 +34,7 @@ Oct 22 17:48:42 vmi673390 postfix/smtp[183182]: 3B838E03CA: to=<james@mercstudio
 
 */
 // var postfixRegLine = regexp.MustCompile("(?i)([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*):.*$")
-var postfixRegLine = regexp.MustCompile("(?i)([a-z]* \\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*): (from|to)=<([a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,4})>,.*$")
+var postfixRegLine = regexp.MustCompile("(?i)([a-z]*  ?\\d+ \\d+:\\d+:\\d+) [a-zA-Z0-9_]* postfix/[a-z]*\\[\\d*\\]: ([a-z0-9]*): (from|to)=<([a-z0-9._%+\\-]+@[a-z0-9.\\-]+\\.[a-z]{2,4})>,.*$")
 // var postfixRegLine = regexp.MustCompile("(?i)(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}:\\d{2}) ([^ ]*) ([^ ]*) .* A=dovecot_[a-zA-z]*:([^ ]*) (.*) for (.*)$")
 var notifyEmail = ""
 
