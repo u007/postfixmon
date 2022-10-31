@@ -5,7 +5,7 @@ build:
 
 run:
 	API_TOKEN=aaa go run main.go reset
-	API_TOKEN=aaa go run main.go run
+	API_TOKEN=aaa PF_LOG=mail.log go run main.go run
 
 rerun:
 	# make rerun date="2022 oct 16"

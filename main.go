@@ -48,7 +48,7 @@ func getEnv(key, defaultValue string) string {
 
 
 func main() {
-	logFile := "mail.log"
+	logFile := getEnv("PF_LOG", "/var/log/mail.log")
 	serverType := getEnv("SERVERTYPE", "virtualmin")
 	whm.ApiToken = getEnv("API_TOKEN", "")
 	if whm.ApiToken == "" && serverType == "cpanel" {
