@@ -277,7 +277,8 @@ func cleanupFrom(thetime time.Time) error {
 
 			dirtime, err := time.Parse("2006_01_02", date)
 			if err != nil {
-				panic(fmt.Errorf("Unable to read date: %#v", date))
+				log("Warning: Could not parse date from directory name '%s': %v. Skipping.", dateDir, err)
+				continue // Skip to the next directory
 			}
 
 			if !t.After(dirtime) {
