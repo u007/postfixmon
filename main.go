@@ -308,6 +308,9 @@ func emailDomainName(email string) (string, error) {
 	}
 
 	domain := trimmedEmail[lastPos+1:]
+	if domain == "" {
+		return "", fmt.Errorf("domain is empty, not valid email: " + email)
+	}
 	log("domain %s, email: %s", domain, email)
 
 	return domain, nil
@@ -802,6 +805,6 @@ func MustSize(path string) int64 {
 	return fi.Size()
 }
 
-func log(msg string, args ...interface{}) {
+var log = func(msg string, args ...interface{}) {
 	fmt.Printf("pfmon(v1.0.0):"+msg+"\n", args...)
 }
